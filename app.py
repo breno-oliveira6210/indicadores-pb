@@ -21,7 +21,6 @@ from src.data import anos_disponiveis, carregar_dados, combinar, filtrar, regist
 
 st.set_page_config(
     page_title="PB | Departamento Pessoal",
-    page_icon=":material/analytics:",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -74,31 +73,44 @@ st.markdown(
     section[data-testid="stSidebar"] { display: none !important; }
     [data-testid="stSidebarCollapseButton"] { display: none !important; }
 
-    /* Navegação nativa superior: forte e evidente. */
+    /* Navegação horizontal própria: visível, simples e sem sidebar. */
     header[data-testid="stHeader"] {
         background: #ffffff !important;
         border-bottom: 1px solid var(--line) !important;
         box-shadow: none !important;
     }
-    [data-testid="stNavigation"] nav {
-        justify-content: flex-start !important;
-        gap: .15rem !important;
-        padding: .25rem 1.3rem !important;
+    .main-nav-wrap {
+        background: #ffffff;
+        border-bottom: 1px solid var(--line);
+        padding: .45rem 0 .55rem;
+        margin: -.25rem 0 1.1rem;
     }
-    [data-testid="stNavigation"] a {
-        color: #59636d !important;
-        font-size: .88rem !important;
-        font-weight: 700 !important;
-        padding: .62rem .95rem !important;
+    .main-nav-wrap button {
+        min-height: 38px !important;
         border-radius: 7px !important;
+        font-size: .84rem !important;
+        font-weight: 750 !important;
+        letter-spacing: -.005em;
+        box-shadow: none !important;
     }
-    [data-testid="stNavigation"] a:hover {
-        background: #f0f3f5 !important;
+    .main-nav-wrap button[kind="secondary"] {
+        border-color: transparent !important;
+        background: transparent !important;
+        color: #5c6670 !important;
+    }
+    .main-nav-wrap button[kind="secondary"]:hover {
+        background: #f1f3f5 !important;
         color: #20272d !important;
+        border-color: #e3e7ea !important;
     }
-    [data-testid="stNavigation"] a[aria-current="page"] {
+    .main-nav-wrap button[kind="primary"] {
         background: var(--nav) !important;
+        border-color: var(--nav) !important;
         color: #ffffff !important;
+    }
+    .main-nav-wrap button[kind="primary"]:hover {
+        background: #1f2930 !important;
+        border-color: #1f2930 !important;
     }
 
     h1, h2, h3 {
@@ -210,7 +222,7 @@ st.markdown(
 
     @media (max-width: 900px) {
         .block-container { padding-left:1rem !important; padding-right:1rem !important; }
-        [data-testid="stNavigation"] nav { overflow-x:auto !important; justify-content:flex-start !important; }
+        .main-nav-wrap { overflow-x:auto !important; }
     }
     </style>
     """,
@@ -431,18 +443,45 @@ def page_companies():
                         st.dataframe(t, width="stretch", hide_index=True, height=260)
 
 
+def render_navigation():
+    """Navegação horizontal própria, sem sidebar e sem st.navigation.
+
+    O uso de botões mantém o app compatível com versões do Streamlit
+    suportadas pelo projeto e permite controlar visualmente a navegação.
+    """
+    opcoes = ["Visão geral", "Admissões", "Férias", "Rescisões", "Empresas"]
+    atual = st.session_state.get("nav_page", "Visão geral")
+
+    st.markdown('<div class="main-nav-wrap">', unsafe_allow_html=True)
+    cols = st.columns([1.05, 1, 1, 1, 1], gap="small")
+    for col, opcao in zip(cols, opcoes):
+        with col:
+            tipo = "primary" if opcao == atual else "secondary"
+            if st.button(
+                opcao,
+                key=f"nav_{opcao}",
+                type=tipo,
+                use_container_width=True,
+            ):
+                st.session_state["nav_page"] = opcao
+                st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    return atual
+
+
 def run():
-    page = st.navigation(
-        [
-            st.Page(page_overview, title="Visão geral"),
-            st.Page(lambda: page_category("Admissões"), title="Admissões"),
-            st.Page(lambda: page_category("Férias"), title="Férias"),
-            st.Page(lambda: page_category("Rescisões"), title="Rescisões"),
-            st.Page(page_companies, title="Empresas"),
-        ],
-        position="top",
-    )
-    page.run()
+    atual = render_navigation()
+
+    if atual == "Visão geral":
+        page_overview()
+    elif atual == "Admissões":
+        page_category("Admissões")
+    elif atual == "Férias":
+        page_category("Férias")
+    elif atual == "Rescisões":
+        page_category("Rescisões")
+    else:
+        page_companies()
 
 
 if __name__ == "__main__":
