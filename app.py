@@ -1,367 +1,449 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
+import sys
 import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
-SRC_DIR = BASE_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
-from src.analytics import (  # noqa: E402
-    categoria_resumo,
-    decimal_br,
-    insights_gerais,
-    mensal,
-    numero,
-    ranking,
-    signed_percent,
-    top_n_share,
-    yoy_total,
-)
-from src.charts import (  # noqa: E402
-    grafico_categoria_comparado,
-    grafico_composicao_categorias,
-    grafico_empresa_mix,
-    grafico_empresa_periodo,
-    grafico_evolucao_geral,
-    grafico_pareto,
+from src.analytics import decimal_br, mensal, numero, percentual, ranking, resumo
+from src.charts import (
+    grafico_categoria_mensal,
+    grafico_composicao,
+    grafico_empresa_mensal,
     grafico_ranking,
+    grafico_total_mensal,
 )
-from src.config import CATEGORIAS, COLORS, Filters, MESES_ABREV, PLOT_CONFIG  # noqa: E402
-from src.data import (  # noqa: E402
-    anos_disponiveis,
-    combinar,
-    datasets,
-    filtrar,
-    ultimo_mes_disponivel,
-    registros_para_exibicao,
-)
-from src.ui import chart_title, header, inject_css, insight_strip, metric_row, ranking_table_html  # noqa: E402
-
+from src.config import CATEGORIAS, COLORS, MESES_ABREV
+from src.data import anos_disponiveis, carregar_dados, combinar, filtrar, registros_para_exibicao
 
 st.set_page_config(
-    page_title="PB | Indicadores do Departamento Pessoal",
+    page_title="PB | Departamento Pessoal",
     page_icon=":material/analytics:",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-st.session_state.setdefault("base_dir", BASE_DIR)
-inject_css()
-
 
 @st.cache_data(ttl=1800, max_entries=2, show_spinner=False)
-def load_all() -> dict[str, object]:
-    return datasets()
+def load_data():
+    return carregar_dados()
 
 
 try:
-    DFS = load_all()
+    _adm, _fer, _res = load_data()
 except Exception as exc:
     st.error("Não foi possível carregar os dados do dashboard.")
     st.exception(exc)
     st.stop()
 
+DFS = {"Admissões": _adm, "Férias": _fer, "Rescisões": _res}
 YEARS = anos_disponiveis(DFS)
 if not YEARS:
     st.warning("Não existem anos de referência disponíveis.")
     st.stop()
 
 LATEST_YEAR = YEARS[-1]
-LATEST_MONTH = ultimo_mes_disponivel(DFS, LATEST_YEAR)
 
 
-def init_filters() -> None:
-    st.session_state.setdefault("filter_year", LATEST_YEAR)
-    st.session_state.setdefault("filter_period", (1, LATEST_MONTH))
-    st.session_state.setdefault("filter_categories", list(CATEGORIAS))
+# -----------------------------------------------------------------------------
+# CSS — visual propositalmente discreto
+# -----------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    :root {
+        --bg: #f6f7f8;
+        --surface: #ffffff;
+        --text: #22272e;
+        --muted: #6d7680;
+        --line: #dfe4e8;
+        --line-soft: #e9edf0;
+        --nav: #26313a;
+    }
 
-    # Corrige estados antigos ou anos removidos da base.
-    if st.session_state["filter_year"] not in YEARS:
-        st.session_state["filter_year"] = LATEST_YEAR
-        st.session_state["filter_period"] = (1, LATEST_MONTH)
+    .stApp { background: var(--bg); }
+    .block-container {
+        max-width: 1500px;
+        padding: 1.25rem 2.5rem 3rem !important;
+    }
 
-    start, end = st.session_state["filter_period"]
-    max_month = ultimo_mes_disponivel(DFS, st.session_state["filter_year"])
-    start = min(max(int(start), 1), max_month)
-    end = min(max(int(end), start), max_month)
-    st.session_state["filter_period"] = (start, end)
+    /* Sidebar: inexistente visualmente. */
+    section[data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+
+    /* Navegação nativa superior: forte e evidente. */
+    header[data-testid="stHeader"] {
+        background: #ffffff !important;
+        border-bottom: 1px solid var(--line) !important;
+        box-shadow: none !important;
+    }
+    [data-testid="stNavigation"] nav {
+        justify-content: flex-start !important;
+        gap: .15rem !important;
+        padding: .25rem 1.3rem !important;
+    }
+    [data-testid="stNavigation"] a {
+        color: #59636d !important;
+        font-size: .88rem !important;
+        font-weight: 700 !important;
+        padding: .62rem .95rem !important;
+        border-radius: 7px !important;
+    }
+    [data-testid="stNavigation"] a:hover {
+        background: #f0f3f5 !important;
+        color: #20272d !important;
+    }
+    [data-testid="stNavigation"] a[aria-current="page"] {
+        background: var(--nav) !important;
+        color: #ffffff !important;
+    }
+
+    h1, h2, h3 {
+        color: var(--text) !important;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: -.025em;
+    }
+    h1 { font-size: 1.85rem !important; margin: 0 !important; }
+    h2 { font-size: 1.12rem !important; margin: 0 !important; }
+
+    .top-brand {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap: 1rem;
+        margin: .25rem 0 1rem;
+        padding-bottom: .85rem;
+        border-bottom: 1px solid var(--line);
+    }
+    .brand-left { display:flex; align-items:center; gap:.7rem; }
+    .brand-mark {
+        width: 34px; height:34px; border-radius:8px;
+        display:flex; align-items:center; justify-content:center;
+        background:#25313a; color:#fff; font-size:.72rem; font-weight:800;
+    }
+    .brand-title { font-weight:800; color:#263039; font-size:.92rem; }
+    .brand-sub { font-size:.72rem; color:var(--muted); margin-top:.1rem; }
+    .data-context { font-size:.75rem; color:var(--muted); }
+
+    .filter-strip {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: .65rem .8rem .7rem;
+        margin-bottom: 1.35rem;
+    }
+    .filter-label {
+        font-size: .68rem; font-weight:800; text-transform:uppercase;
+        letter-spacing:.08em; color:#707983; margin-bottom:.45rem;
+    }
+    label[data-testid="stWidgetLabel"] p {
+        font-size: .72rem !important;
+        color: #65707a !important;
+        font-weight: 700 !important;
+    }
+    div[data-baseweb="select"] > div {
+        min-height:36px !important;
+        border: 1px solid var(--line) !important;
+        border-radius:7px !important;
+    }
+
+    .section-head {
+        display:flex; align-items:baseline; justify-content:space-between;
+        gap:1rem; margin: .2rem 0 .65rem;
+    }
+    .section-kicker {
+        color:#77818a; font-size:.66rem; font-weight:800;
+        text-transform:uppercase; letter-spacing:.1em;
+    }
+    .section-note { color:var(--muted); font-size:.74rem; }
+
+    /* KPIs sem excesso de cartões. */
+    div[data-testid="stMetric"] {
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        padding: .15rem .7rem .4rem .05rem !important;
+        min-height: 0 !important;
+        box-shadow:none !important;
+    }
+    div[data-testid="stMetricLabel"] p {
+        color:#747d86 !important;
+        font-size:.72rem !important;
+        font-weight:700 !important;
+    }
+    div[data-testid="stMetricValue"] {
+        color:var(--text) !important;
+        font-size:1.55rem !important;
+        letter-spacing:-.035em;
+    }
+    div[data-testid="stMetricDelta"] { font-size:.7rem !important; }
+    div[data-testid="stMetricDelta"] svg { display:none !important; }
+
+    .chart-card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: .55rem .75rem .5rem;
+    }
+    .empty {
+        background:#fff; border:1px dashed #cbd2d7; border-radius:9px;
+        padding:1.4rem; color:var(--muted); font-size:.82rem;
+    }
+    .table-wrap { margin-top:.9rem; }
+    [data-testid="stDataFrame"] {
+        border:1px solid var(--line) !important;
+        border-radius:8px !important;
+        overflow:hidden;
+    }
+    details[data-testid="stExpander"] {
+        border:1px solid var(--line) !important;
+        border-radius:8px !important;
+        background:#fff !important;
+    }
+    .caption {
+        color:#7a838b; font-size:.68rem; margin-top:.4rem;
+    }
+    #MainMenu, footer { visibility:hidden; }
+
+    @media (max-width: 900px) {
+        .block-container { padding-left:1rem !important; padding-right:1rem !important; }
+        [data-testid="stNavigation"] nav { overflow-x:auto !important; justify-content:flex-start !important; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-init_filters()
+def page_filters(allow_company: bool = False):
+    max_month = 12
+    start_default = 1
+    end_default = 12
 
-
-def active_filters() -> Filters:
-    start, end = st.session_state["filter_period"]
-    categories = tuple(st.session_state.get("filter_categories", CATEGORIAS))
-    return Filters(
-        year=int(st.session_state["filter_year"]),
-        start_month=int(start),
-        end_month=int(end),
-        categories=categories or tuple(CATEGORIAS),
-    )
-
-
-def render_filter_bar(show_categories: bool = True) -> Filters:
-    with st.container(border=True, key="filter_bar"):
-        st.markdown('<div class="filterbar-title">Contexto de análise</div>', unsafe_allow_html=True)
-        cols = st.columns([.85, 1.45, 2.2, 1.9], gap="small")
-        with cols[0]:
-            st.selectbox("Ano", YEARS, key="filter_year")
-        with cols[1]:
-            max_month = ultimo_mes_disponivel(DFS, int(st.session_state["filter_year"]))
-            previous = st.session_state.get("filter_period", (1, max_month))
-            previous = (min(previous[0], max_month), min(previous[1], max_month))
-            if previous[0] > previous[1]:
-                previous = (1, max_month)
-            st.select_slider(
-                "Período",
-                options=list(range(1, max_month + 1)),
-                value=previous,
-                format_func=lambda x: MESES_ABREV[x],
-                key="filter_period",
-            )
+    st.markdown('<div class="filter-label">Filtros</div>', unsafe_allow_html=True)
+    cols = st.columns([.85, 1.4, 1.8] if allow_company else [.9, 1.5], gap="small")
+    with cols[0]:
+        year = st.selectbox("Ano", YEARS, index=len(YEARS) - 1, key=f"year_{allow_company}")
+    with cols[1]:
+        period = st.select_slider(
+            "Período",
+            options=list(range(1, max_month + 1)),
+            value=(start_default, end_default),
+            format_func=lambda x: MESES_ABREV[x],
+            key=f"period_{allow_company}",
+        )
+    company = None
+    if allow_company:
         with cols[2]:
-            if show_categories:
-                st.multiselect("Categorias", CATEGORIAS, key="filter_categories", placeholder="Todas")
-            else:
-                st.markdown('<div class="filter-summary">Filtro global: ano + período</div>', unsafe_allow_html=True)
-        with cols[3]:
-            f = active_filters()
-            st.markdown(
-                f'<div class="filter-summary"><b>{f.period_label}</b><br>{len(f.categories)} categoria(s) • filtros preservados entre páginas</div>',
-                unsafe_allow_html=True,
+            all_companies = (
+                pd.concat([DFS[c]["empresa"] for c in CATEGORIAS], ignore_index=True)
+                .dropna().astype(str).str.strip().drop_duplicates().sort_values().tolist()
             )
-    return active_filters()
+            company = st.selectbox("Empresa", ["Todas as empresas", *all_companies], key="company_global")
+    return int(year), int(period[0]), int(period[1]), company
 
 
-def filtered_combined(f: Filters) -> object:
-    combined = combinar({c: DFS[c] for c in f.categories}, f.categories)
-    if combined.empty:
-        return combined
-    return filtrar(combined, f.year, f.start_month, f.end_month)
-
-
-def page_overview() -> None:
-    f = render_filter_bar(show_categories=True)
-    base = filtered_combined(f)
-    context = f"Dados disponíveis até {MESES_ABREV[ultimo_mes_disponivel(DFS, f.year)]} de {f.year}."
-    header(
-        "Cockpit executivo",
-        "Departamento Pessoal",
-        "Leitura consolidada do volume de trabalho, evolução e concentração das demandas.",
-        context,
+def brand():
+    logo = BASE_DIR / "pb_logo.png"
+    if logo.exists():
+        import base64
+        b64 = base64.b64encode(logo.read_bytes()).decode("ascii")
+        mark = f'<img src="data:image/png;base64,{b64}" style="height:32px;width:auto;object-fit:contain;" />'
+    else:
+        mark = '<div class="brand-mark">PB</div>'
+    st.markdown(
+        f'''<div class="top-brand"><div class="brand-left">{mark}<div><div class="brand-title">Departamento Pessoal</div><div class="brand-sub">PB Contabilidade Integrada</div></div></div><div class="data-context">Dados consolidados automaticamente</div></div>''',
+        unsafe_allow_html=True,
     )
 
-    total = len(base)
-    active_companies = int(base["empresa"].nunique()) if not base.empty else 0
-    m = mensal(base, f.start_month, f.end_month)
-    peak = int(m["volume"].max()) if not m.empty else 0
-    peak_month = str(m.loc[m["volume"].idxmax(), "mes"]) if not m.empty and peak else "—"
-    media = float(m["volume"].mean()) if not m.empty else 0
-    yoy = yoy_total(DFS, f.categories, f.year, f.start_month, f.end_month)
 
-    metric_row([
-        ("Volume total", numero(total), signed_percent(yoy) if yoy is not None else None, "Variação contra o mesmo período do ano anterior."),
-        ("Média mensal", decimal_br(media), None, "Média de movimentações nos meses do período selecionado."),
-        ("Pico de demanda", numero(peak), None, f"{peak_month} foi o mês com maior volume no período." if peak else "Não há pico disponível."),
-        ("Empresas atendidas", numero(active_companies), None, "Quantidade de empresas com pelo menos um registro."),
+def section(kicker: str, title: str, note: str = ""):
+    note_html = f'<div class="section-note">{note}</div>' if note else ''
+    st.markdown(f'<div class="section-head"><div><div class="section-kicker">{kicker}</div><h2>{title}</h2></div>{note_html}</div>', unsafe_allow_html=True)
+
+
+def render_kpis(items):
+    cols = st.columns(len(items), gap="medium")
+    for col, (label, value) in zip(cols, items):
+        with col:
+            st.metric(label, value)
+
+
+def base_filtered(year, start, end):
+    frames = []
+    for cat in CATEGORIAS:
+        df = filtrar(DFS[cat], year, start, end)
+        if not df.empty:
+            x = df.copy()
+            x["categoria"] = cat
+            frames.append(x)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def page_overview():
+    brand()
+    year, start, end, _ = page_filters()
+    base = base_filtered(year, start, end)
+    period = f"{MESES_ABREV[start]}–{MESES_ABREV[end]} {year}" if start != end else f"{MESES_ABREV[start]} {year}"
+
+    section("Visão geral", "Movimentação do Departamento Pessoal", period)
+    r = resumo(base, start, end) if not base.empty else {"total":0,"media":0,"pico":0,"mes_pico":"—","empresas":0}
+    render_kpis([
+        ("Volume total", numero(r["total"])),
+        ("Média mensal", decimal_br(r["media"])),
+        ("Maior mês", f'{numero(r["pico"])} · {r["mes_pico"]}' if r["pico"] else "—"),
+        ("Empresas", numero(r["empresas"])),
     ])
 
-    insight_strip(insights_gerais(DFS, f.year, f.start_month, f.end_month, f.categories))
+    if base.empty:
+        st.markdown('<div class="empty">Não há registros para os filtros selecionados.</div>', unsafe_allow_html=True)
+        return
 
-    c1, c2 = st.columns([1.62, 1], gap="large")
+    st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+    section("Evolução", "Volume mensal")
+    with st.container(border=True):
+        st.plotly_chart(grafico_total_mensal(base, start, end), width="stretch", config={"displayModeBar":False,"responsive":True})
+
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 1.35], gap="large")
     with c1:
-        chart_title("Evolução", "Volume mensal", "Barras mostram o volume observado; a linha suaviza a leitura da tendência recente.")
-        st.plotly_chart(grafico_evolucao_geral(base, f.year, f.start_month, f.end_month), width="stretch", config=PLOT_CONFIG)
+        section("Categorias", "Distribuição do volume")
+        with st.container(border=True):
+            st.plotly_chart(grafico_composicao(base, start, end), width="stretch", config={"displayModeBar":False,"responsive":True})
     with c2:
-        chart_title("Composição", "Distribuição por categoria", "A composição evidencia o peso relativo de cada tipo de demanda.")
-        st.plotly_chart(grafico_composicao_categorias(base, f.start_month, f.end_month), width="stretch", config=PLOT_CONFIG)
-        mix = categoria_resumo({c: DFS[c] for c in f.categories}, f.year, f.start_month, f.end_month)
-        st.dataframe(
-            mix.rename(columns={"categoria": "Categoria", "volume": "Volume", "participacao": "Participação"}),
-            width="stretch",
-            hide_index=True,
-            height=165,
-            column_config={
-                "Categoria": st.column_config.TextColumn(width="medium"),
-                "Volume": st.column_config.NumberColumn(format="%d", width="small"),
-                "Participação": st.column_config.NumberColumn(format="%.1f%%", width="small"),
-            },
-        )
+        section("Empresas", "Maiores volumes")
+        with st.container(border=True):
+            st.plotly_chart(grafico_ranking(base, 10), width="stretch", config={"displayModeBar":False,"responsive":True})
 
-    c3, c4 = st.columns([1.35, 1], gap="large")
-    with c3:
-        chart_title("Concentração", "Empresas com maior demanda", "O ranking responde diretamente onde está o maior volume de trabalho.")
-        st.plotly_chart(grafico_ranking(base, 10), width="stretch", config=PLOT_CONFIG)
-    with c4:
-        chart_title("Dependência da carteira", "Pareto das maiores empresas", "A curva mostra quanto do volume já está coberto pelas maiores empresas.")
-        st.plotly_chart(grafico_pareto(base, 10), width="stretch", config=PLOT_CONFIG)
-
-    rank = ranking(base)
-    if not rank.empty:
-        st.markdown('<div class="section-note" style="margin-top:.2rem">Top 5 empresas concentram <b>{}</b> do volume selecionado.</div>'.format(percentual_br(top_n_share(base, 5))), unsafe_allow_html=True)
-        with st.expander("Ver ranking completo"):
-            st.markdown(ranking_table_html(rank, len(rank)), unsafe_allow_html=True)
+    st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
+    with st.expander("Ver ranking completo"):
+        rank = ranking(base)
+        if rank.empty:
+            st.info("Sem registros.")
+        else:
+            table = rank[["posicao","empresa","volume","participacao"]].rename(columns={"posicao":"Posição","empresa":"Empresa","volume":"Volume","participacao":"Participação"})
+            st.dataframe(table, width="stretch", hide_index=True, column_config={"Volume":st.column_config.NumberColumn(format="%d"),"Participação":st.column_config.NumberColumn(format="%.1f%%")}, height=420)
 
 
-def percentual_br(x: float) -> str:
-    return f"{x:.1f}%".replace(".", ",")
-
-
-def page_category(categoria: str) -> None:
-    f = render_filter_bar(show_categories=False)
-    df = filtrar(DFS[categoria], f.year, f.start_month, f.end_month)
-    color = COLORS[categoria]
-    context = f"{numero(len(df))} registros no período • {f.period_label}."
-    header(
-        categoria,
-        f"{categoria}",
-        f"Leitura operacional e gerencial da demanda de {categoria.lower()}.",
-        context,
-    )
+def page_category(categoria: str):
+    brand()
+    year, start, end, _ = page_filters()
+    df = filtrar(DFS[categoria], year, start, end)
+    period = f"{MESES_ABREV[start]}–{MESES_ABREV[end]} {year}" if start != end else f"{MESES_ABREV[start]} {year}"
+    section(categoria, categoria, period)
 
     if df.empty:
-        st.markdown('<div class="empty-state">Não há registros para os filtros selecionados.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="empty">Não há registros para os filtros selecionados.</div>', unsafe_allow_html=True)
         return
 
-    m = mensal(df, f.start_month, f.end_month)
-    total = len(df)
-    media = float(m["volume"].mean())
-    pico = int(m["volume"].max())
-    mes_pico = str(m.loc[m["volume"].idxmax(), "mes"])
-    empresas = int(df["empresa"].nunique())
-    yoy = None
-    prev = filtrar(DFS[categoria], f.year - 1, f.start_month, f.end_month)
-    if not prev.empty or (DFS[categoria]["ano_referencia"] == f.year - 1).any():
-        ant = len(prev)
-        yoy = None if ant == 0 and total == 0 else (100.0 if ant == 0 else (total / ant - 1) * 100)
-
-    metric_row([
-        ("Volume", numero(total), signed_percent(yoy) if yoy is not None else None, "Variação contra o mesmo período do ano anterior."),
-        ("Média mensal", decimal_br(media), None, "Média de registros por mês no período."),
-        ("Pico", numero(pico), mes_pico, "Mês com maior demanda."),
-        ("Empresas atendidas", numero(empresas), None, "Empresas que geraram pelo menos um registro."),
+    r = resumo(df, start, end)
+    render_kpis([
+        ("Volume", numero(r["total"])),
+        ("Média mensal", decimal_br(r["media"])),
+        ("Maior mês", f'{numero(r["pico"])} · {r["mes_pico"]}'),
+        ("Empresas", numero(r["empresas"])),
     ])
 
-    c1, c2 = st.columns([1.45, .95], gap="large")
-    with c1:
-        chart_title("Evolução", f"{categoria}: trajetória mensal", "A linha tracejada representa o mesmo período do ano anterior quando disponível.")
-        st.plotly_chart(grafico_categoria_comparado(DFS[categoria], f.year, f.start_month, f.end_month, color), width="stretch", config=PLOT_CONFIG)
-    with c2:
-        rank = ranking(df)
-        chart_title("Concentração", "Empresas com maior demanda", "Volume e participação no período.")
-        st.plotly_chart(grafico_ranking(df, 9, color), width="stretch", config=PLOT_CONFIG)
+    st.markdown("<div style='height:.45rem'></div>", unsafe_allow_html=True)
+    section("Evolução", "Volume mensal")
+    with st.container(border=True):
+        st.plotly_chart(grafico_categoria_mensal(df, categoria, start, end), width="stretch", config={"displayModeBar":False,"responsive":True})
 
-    c3, c4 = st.columns([1.1, .9], gap="large")
-    with c3:
-        chart_title("Ranking", "Distribuição por empresa")
-        st.markdown(ranking_table_html(rank, 10), unsafe_allow_html=True)
-    with c4:
-        chart_title("Empresa em foco", "Perfil da empresa selecionada")
-        if rank.empty:
-            st.info("Sem empresas disponíveis.")
-            return
-        empresa = st.selectbox("Empresa", rank["empresa"].tolist(), key=f"company_focus_{categoria}_{f.year}", label_visibility="collapsed")
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+    section("Empresas", "Maiores volumes")
+    with st.container(border=True):
+        st.plotly_chart(grafico_ranking(df, 15, color=COLORS[categoria]), width="stretch", config={"displayModeBar":False,"responsive":True})
+
+    rank = ranking(df)
+    empresas = rank["empresa"].tolist()
+    if not empresas:
+        return
+
+    st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
+    with st.expander("Analisar uma empresa"):
+        empresa = st.selectbox("Empresa", empresas, key=f"empresa_{categoria}_{year}_{start}_{end}")
         df_emp = df[df["empresa"].eq(empresa)].copy()
-        total_emp = len(df_emp)
-        share = total_emp / total * 100 if total else 0
-        mm = mensal(df_emp, f.start_month, f.end_month)
-        peak_emp = int(mm["volume"].max()) if not mm.empty else 0
-        a, b, c = st.columns(3, gap="small")
-        a.metric("Volume", numero(total_emp))
-        b.metric("Participação", f"{decimal_br(share)}%")
-        c.metric("Pico", numero(peak_emp))
-        st.plotly_chart(grafico_empresa_periodo(DFS[categoria], f.year, f.start_month, f.end_month, empresa, color), width="stretch", config=PLOT_CONFIG)
-
-        with st.expander("Ver registros"):
-            tabela = registros_para_exibicao(df_emp, categoria)
-            if tabela.empty:
-                st.info("Não foi possível localizar as colunas de detalhamento disponíveis na base.")
-            else:
-                col_cfg = {}
-                for col in tabela.columns:
-                    if col in ["Empresa", "Funcionário"]:
-                        col_cfg[col] = st.column_config.TextColumn(width="medium")
-                    elif col == "Ano":
-                        col_cfg[col] = st.column_config.NumberColumn(format="%d", width="small")
-                    else:
-                        col_cfg[col] = st.column_config.TextColumn(width="small")
-                st.dataframe(tabela, width="stretch", hide_index=True, height=360, column_config=col_cfg, lazy=True)
+        er = resumo(df_emp, start, end)
+        a,b,c = st.columns(3)
+        a.metric("Volume", numero(er["total"]))
+        b.metric("Participação", percentual((er["total"] / r["total"] * 100) if r["total"] else 0))
+        c.metric("Maior mês", f'{numero(er["pico"])} · {er["mes_pico"]}')
+        st.plotly_chart(grafico_empresa_mensal(df_emp, start, end, color=COLORS[categoria]), width="stretch", config={"displayModeBar":False,"responsive":True})
+        tabela = registros_para_exibicao(df_emp, categoria)
+        if not tabela.empty:
+            st.dataframe(tabela, width="stretch", hide_index=True, height=300)
 
 
-def page_companies() -> None:
-    f = render_filter_bar(show_categories=True)
-    base = filtered_combined(f)
-    header(
-        "Carteira",
-        "Empresas",
-        "Onde está a demanda e como o perfil de cada empresa se distribui entre as categorias.",
-        f"Período analisado: {f.period_label}.",
-    )
+def page_companies():
+    brand()
+    year, start, end, company = page_filters(allow_company=True)
+    base = base_filtered(year, start, end)
+    period = f"{MESES_ABREV[start]}–{MESES_ABREV[end]} {year}" if start != end else f"{MESES_ABREV[start]} {year}"
+    section("Empresas", "Análise por empresa", period)
+
     if base.empty:
-        st.markdown('<div class="empty-state">Não há empresas para os filtros selecionados.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="empty">Não há registros para os filtros selecionados.</div>', unsafe_allow_html=True)
         return
 
     rank = ranking(base)
-    top = rank.iloc[0]
-    metric_row([
-        ("Empresas", numero(len(rank)), None, "Número de empresas com demanda no período."),
-        ("Maior demandante", str(top["empresa"]), None, "Empresa com maior volume no período."),
-        ("Volume da líder", numero(top["volume"]), None, f"A líder representa {decimal_br(top['participacao'])}% do volume total."),
-        ("Top 5", percentual_br(top_n_share(base, 5)), None, "Participação acumulada das cinco maiores empresas."),
-    ])
-
-    c1, c2 = st.columns([1.15, 1], gap="large")
-    with c1:
-        chart_title("Ranking", "Maiores empresas por volume", "Use o ranking como ponto de entrada para investigar concentração e dependência da carteira.")
-        st.plotly_chart(grafico_ranking(base, 14), width="stretch", config=PLOT_CONFIG)
-    with c2:
-        chart_title("Curva de concentração", "Pareto da carteira")
-        st.plotly_chart(grafico_pareto(base, 14), width="stretch", config=PLOT_CONFIG)
-
-    st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
-    c3, c4 = st.columns([1, 1], gap="large")
-    with c3:
-        chart_title("Empresa em foco", "Selecione uma empresa")
-        empresas = rank["empresa"].tolist()
-        empresa = st.selectbox("Empresa", empresas, key=f"empresa_carteira_{f.year}_{f.start_month}_{f.end_month}", label_visibility="collapsed")
-        df_emp = base[base["empresa"].eq(empresa)].copy()
-        total_emp = len(df_emp)
-        share = total_emp / len(base) * 100 if len(base) else 0
-        st.metric("Volume no período", numero(total_emp), f"{decimal_br(share)}% do total")
-        st.plotly_chart(grafico_empresa_mix(df_emp), width="stretch", config=PLOT_CONFIG)
-    with c4:
-        chart_title("Evolução", "Volume mensal da empresa")
-        st.plotly_chart(grafico_evolucao_geral(df_emp, f.year, f.start_month, f.end_month), width="stretch", config=PLOT_CONFIG)
-
-    with st.expander("Ver ranking completo e participação"):
-        st.dataframe(
-            rank.rename(columns={"posicao": "Posição", "empresa": "Empresa", "volume": "Volume", "participacao": "Participação", "acumulado": "Acumulado"})[["Posição", "Empresa", "Volume", "Participação", "Acumulado"]],
-            width="stretch",
-            hide_index=True,
-            height=420,
-            column_config={
-                "Posição": st.column_config.NumberColumn(format="%d", width="small"),
-                "Empresa": st.column_config.TextColumn(width="large"),
-                "Volume": st.column_config.NumberColumn(format="%d", width="small"),
-                "Participação": st.column_config.NumberColumn(format="%.1f%%", width="small"),
-                "Acumulado": st.column_config.NumberColumn(format="%.1f%%", width="small"),
-            },
-            lazy=True,
-        )
+    if company == "Todas as empresas" or company is None:
+        render_kpis([
+            ("Empresas atendidas", numero(len(rank))),
+            ("Volume total", numero(len(base))),
+            ("Maior empresa", rank.iloc[0]["empresa"] if not rank.empty else "—"),
+            ("Volume da maior", numero(int(rank.iloc[0]["volume"])) if not rank.empty else "—"),
+        ])
+        st.markdown("<div style='height:.45rem'></div>")
+        section("Ranking", "Empresas por volume")
+        with st.container(border=True):
+            st.plotly_chart(grafico_ranking(base, 20), width="stretch", config={"displayModeBar":False,"responsive":True})
+    else:
+        df_emp = base[base["empresa"].eq(company)].copy()
+        r = resumo(df_emp, start, end)
+        total_base = len(base)
+        render_kpis([
+            ("Empresa", company),
+            ("Volume", numero(r["total"])),
+            ("Participação", percentual(r["total"] / total_base * 100 if total_base else 0)),
+            ("Maior mês", f'{numero(r["pico"])} · {r["mes_pico"]}' if r["pico"] else "—"),
+        ])
+        st.markdown("<div style='height:.45rem'></div>")
+        c1,c2 = st.columns([1.35, 1], gap="large")
+        with c1:
+            section("Evolução", "Volume mensal")
+            with st.container(border=True):
+                st.plotly_chart(grafico_empresa_mensal(df_emp, start, end), width="stretch", config={"displayModeBar":False,"responsive":True})
+        with c2:
+            section("Categoria", "Distribuição")
+            with st.container(border=True):
+                st.plotly_chart(grafico_composicao(df_emp, start, end), width="stretch", config={"displayModeBar":False,"responsive":True})
+        tabela = registros_para_exibicao(df_emp, None) if False else None
+        with st.expander("Ver registros"):
+            for categoria in CATEGORIAS:
+                x = df_emp[df_emp["categoria"].eq(categoria)]
+                if not x.empty:
+                    st.markdown(f"**{categoria}** — {len(x):,}".replace(",", "."))
+                    t = registros_para_exibicao(x, categoria)
+                    if not t.empty:
+                        st.dataframe(t, width="stretch", hide_index=True, height=260)
 
 
-PAGES = [
-    st.Page(page_overview, title="Visão Geral", url_path="", default=True),
-    st.Page(lambda: page_category("Admissões"), title="Admissões", url_path="admissoes"),
-    st.Page(lambda: page_category("Férias"), title="Férias", url_path="ferias"),
-    st.Page(lambda: page_category("Rescisões"), title="Rescisões", url_path="rescisoes"),
-    st.Page(page_companies, title="Empresas", url_path="empresas"),
-]
+def run():
+    page = st.navigation(
+        [
+            st.Page(page_overview, title="Visão geral", icon=""),
+            st.Page(lambda: page_category("Admissões"), title="Admissões", icon=""),
+            st.Page(lambda: page_category("Férias"), title="Férias", icon=""),
+            st.Page(lambda: page_category("Rescisões"), title="Rescisões", icon=""),
+            st.Page(page_companies, title="Empresas", icon=""),
+        ],
+        position="top",
+    )
+    page.run()
 
-pg = st.navigation(PAGES, position="top")
-pg.run()
+
+if __name__ == "__main__":
+    run()
