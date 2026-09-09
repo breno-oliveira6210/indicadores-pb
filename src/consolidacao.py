@@ -35,6 +35,9 @@ def consolidar_tipo(tipo, arquivos):
         )
         partes.append(df)
 
+    if not partes:
+        return pd.DataFrame()
+
     df_completo = pd.concat(partes, ignore_index=True)
 
     # Remove duplicatas, mantendo a primeira ocorrência de cada evento único
@@ -51,7 +54,7 @@ def consolidar_tipo(tipo, arquivos):
 
 
 def consolidar_tudo():
-    """Retorna um único dataframe com ADM + FER + RES já limpos e deduplicados."""
+    """Retorna as três bases já limpas e deduplicadas: [ADM, FER, RES]."""
     validos, invalidos = listar_arquivos()
 
     if invalidos:
@@ -63,7 +66,7 @@ def consolidar_tudo():
         partes.append(df_tipo)
         print(f"{tipo}: {len(df_tipo)} eventos únicos após deduplicação")
 
-    return partes  # lista com 3 dataframes: [df_adm, df_fer, df_res]
+    return partes
 
 
 if __name__ == "__main__":
