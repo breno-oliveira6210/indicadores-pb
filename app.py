@@ -434,11 +434,11 @@ def page_companies():
 def run():
     page = st.navigation(
         [
-            st.Page(page_overview, title="Visão geral", icon=""),
-            st.Page(lambda: page_category("Admissões"), title="Admissões", icon=""),
-            st.Page(lambda: page_category("Férias"), title="Férias", icon=""),
-            st.Page(lambda: page_category("Rescisões"), title="Rescisões", icon=""),
-            st.Page(page_companies, title="Empresas", icon=""),
+            st.Page(page_overview, title="Visão geral"),
+            st.Page(lambda: page_category("Admissões"), title="Admissões"),
+            st.Page(lambda: page_category("Férias"), title="Férias"),
+            st.Page(lambda: page_category("Rescisões"), title="Rescisões"),
+            st.Page(page_companies, title="Empresas"),
         ],
         position="top",
     )
