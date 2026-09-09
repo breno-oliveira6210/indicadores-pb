@@ -1,6 +1,6 @@
 import pandas as pd
-from ingestion import listar_arquivos
-from cleaning import limpar_arquivo
+from .ingestion import listar_arquivos
+from .cleaning import limpar_arquivo
 
 # Coluna que define a data "oficial" de cada tipo de evento,
 # usada tanto para deduplicar quanto para saber o mês/ano real do evento
