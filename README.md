@@ -1,8 +1,6 @@
-# PB — Departamento Pessoal
+# PB - Departamento Pessoal
 
-Dashboard executivo de visualização de movimentações de Departamento Pessoal.
-
-A versão foi deliberadamente simplificada: navegação horizontal, filtros compactos, poucos indicadores, gráficos grandes e detalhamento sob demanda.
+Dashboard de visualização de movimentações de Departamento Pessoal.
 
 ## Estrutura
 - `app.py`: aplicação
